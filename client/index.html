@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Video + Prompt Upload</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Upload a Video + Prompt</h1>
+      <p class="sub">Max file size: <strong>25 MB</strong>. Allowed: mp4, webm, mov.</p>
+
+      <form id="uploadForm" class="card">
+        <label>
+          Video
+          <input id="videoInput" name="video" type="file" accept="video/mp4,video/webm,video/quicktime" required />
+        </label>
+
+        <label>
+          Prompt
+          <textarea id="promptInput" name="prompt" placeholder="What should we do with this video?" required></textarea>
+        </label>
+
+        <button id="submitBtn" type="submit">Upload</button>
+
+        <div id="status" class="status" aria-live="polite"></div>
+      </form>
+
+      <section class="card">
+        <h2>Recent uploads</h2>
+        <button id="refreshBtn" type="button">Refresh</button>
+        <div id="list"></div>
+      </section>
+    </main>
+
+    <script src="/app.js"></script>
+  </body>
+</html>

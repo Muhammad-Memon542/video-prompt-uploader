@@ -1,0 +1,8 @@
+{
+  "name": "video-prompt-uploader",
+  "private": true,
+  "workspaces": ["server"],
+  "scripts": {
+    "dev": "node server/index.js"
+  }
+}

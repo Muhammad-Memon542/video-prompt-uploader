@@ -1,0 +1,93 @@
+:root {
+  --bg: #0b0f1a;
+  --card: rgba(255,255,255,0.06);
+  --text: rgba(255,255,255,0.92);
+  --muted: rgba(255,255,255,0.65);
+  --border: rgba(255,255,255,0.14);
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial;
+  background: radial-gradient(1200px 700px at 30% 10%, rgba(90,120,255,0.25), transparent 60%),
+              radial-gradient(900px 700px at 70% 30%, rgba(130,70,255,0.18), transparent 60%),
+              var(--bg);
+  color: var(--text);
+}
+
+.container {
+  max-width: 900px;
+  margin: 48px auto;
+  padding: 0 16px;
+}
+
+h1 { margin: 0 0 8px; letter-spacing: 0.2px; }
+.sub { margin: 0 0 24px; color: var(--muted); }
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 18px;
+  backdrop-filter: blur(10px);
+  margin-bottom: 16px;
+}
+
+label {
+  display: block;
+  margin-bottom: 12px;
+  color: var(--muted);
+}
+input[type="file"], textarea {
+  width: 100%;
+  margin-top: 8px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: rgba(0,0,0,0.25);
+  color: var(--text);
+  padding: 10px;
+}
+textarea { min-height: 90px; resize: vertical; }
+
+button {
+  border: 1px solid var(--border);
+  background: rgba(255,255,255,0.08);
+  color: var(--text);
+  padding: 10px 14px;
+  border-radius: 12px;
+  cursor: pointer;
+}
+button:disabled { opacity: 0.55; cursor: not-allowed; }
+
+.status { margin-top: 12px; color: var(--muted); }
+.status[data-type="error"] { color: #ffb4b4; }
+.status[data-type="success"] { color: #b7ffcb; }
+
+.row {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  margin-top: 10px;
+  background: rgba(0,0,0,0.18);
+}
+.meta { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.muted { color: var(--muted); }
+.pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  margin-left: 8px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.prompt { margin-top: 8px; }
+.error { color: #ffb4b4; }
+
+.actions { margin-top: 10px; }
+.transcript {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid rgba(255,255,255,0.14);
+}
