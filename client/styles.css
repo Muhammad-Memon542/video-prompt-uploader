@@ -91,3 +91,38 @@ button:disabled { opacity: 0.55; cursor: not-allowed; }
   padding-top: 10px;
   border-top: 1px solid rgba(255,255,255,0.14);
 }
+
+.segments { margin-top: 8px; }
+.seg { margin: 6px 0; line-height: 1.35; display: flex; gap: 10px; }
+.time {
+  min-width: 170px;
+  color: rgba(255,255,255,0.65);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+.segText { flex: 1; }
+
+.segments { margin-top: 8px; }
+.seg { margin: 6px 0; line-height: 1.35; display: flex; gap: 10px; }
+.time {
+  min-width: 170px;
+  color: rgba(255,255,255,0.65);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  font-size: 12px;
+}
+.segText { flex: 1; }
+
+.geminiSummary { margin-top: 8px; }
+.jsonBox {
+  margin-top: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  border: 1px solid rgba(255,255,255,0.14);
+  background: rgba(0,0,0,0.25);
+  overflow: auto;
+  max-height: 320px;
+  font-size: 12px;
+  line-height: 1.35;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+}
+.actions { margin-top: 10px; display: flex; gap: 10px; flex-wrap: wrap; }

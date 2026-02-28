@@ -1,8 +1,14 @@
 node_modules/
+
+# secrets
 .env
 server/.env
+
+# local runtime data
 server/uploads/
 server/tmp/
 server/data/submissions.json
+
+# OS / logs
 .DS_Store
 *.log
