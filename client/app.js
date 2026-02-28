@@ -12,6 +12,9 @@ const refreshBtn = document.getElementById("refreshBtn");
 // in-memory cache of screenshot urls by submission id
 const screenshotCache = new Map();
 
+// in-memory cache of spliced outputs by submission id
+const spliceCache = new Map();
+
 function setStatus(msg, type = "info") {
   statusEl.textContent = msg;
   statusEl.dataset.type = type;
@@ -45,6 +48,34 @@ function msToStamp(ms) {
 
   if (hh > 0) return `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}.${pad3(msec)}`;
   return `${pad2(mm)}:${pad2(ss)}.${pad3(msec)}`;
+}
+
+/**
+ * Partner behavior: accept either "mm:ss" or seconds (e.g. "12.5")
+ * Returns ms (integer) or null.
+ */
+function parseTimestampToMs(input) {
+  const s = String(input || "").trim();
+  if (!s) return null;
+
+  // mm:ss
+  if (/^\d+:\d{2}$/.test(s)) {
+    const [m, sec] = s.split(":").map(Number);
+    if (!Number.isFinite(m) || !Number.isFinite(sec)) return null;
+    return Math.floor((m * 60 + sec) * 1000);
+  }
+
+  // plain seconds
+  const n = Number(s);
+  if (Number.isFinite(n)) return Math.floor(n * 1000);
+
+  return null;
+}
+
+function clampInt(n, min, max) {
+  const v = Number.parseInt(String(n), 10);
+  if (!Number.isFinite(v)) return null;
+  return Math.max(min, Math.min(max, v));
 }
 
 videoInput.addEventListener("change", () => {
@@ -168,6 +199,61 @@ async function midScreenshot(submissionId, btn) {
   }
 }
 
+// ---------- Splice ----------
+function inferSpliceTimestampMsFromGemini(gemini) {
+  const lb = gemini?.parsed?.longestBreak;
+  if (!lb || typeof lb.breakStartMs !== "number" || typeof lb.breakEndMs !== "number") return null;
+  return Math.round((lb.breakStartMs + lb.breakEndMs) / 2);
+}
+
+async function spliceAtTimestampMs(submissionId, timestampMs, btn) {
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = "Splicing...";
+
+  try {
+    const fd = new FormData();
+    fd.append("submissionId", submissionId);
+    fd.append("timestamp", String(timestampMs));
+
+    const res = await fetch("/api/splice", { method: "POST", body: fd });
+    const data = await res.json();
+    if (!res.ok || !data.ok) throw new Error(data?.error || "Splice failed.");
+
+    // merged server provides outputUrl; partner server provides outputFileName
+    let url = data.outputUrl;
+    if (!url && data.outputFileName) url = `/eavs/${data.outputFileName}`;
+
+    spliceCache.set(submissionId, {
+      url: url ? `${url}?t=${Date.now()}` : null,
+      timestampMs,
+      outputFileName: data.outputFileName || null,
+      outputRaw: data.output || null
+    });
+
+    await loadSubmissions();
+  } catch (e) {
+    alert(e.message || "Splice failed.");
+  } finally {
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+/**
+ * Partner UX: prompt user for "seconds or mm:ss", then splice.
+ */
+async function splicePromptFlow(submissionId, btn) {
+  const input = prompt("Insert timestamp to splice at (seconds or mm:ss):", "00:10");
+  if (!input) return;
+
+  const ms = parseTimestampToMs(input);
+  if (ms == null) return alert('Invalid timestamp format. Use seconds (e.g. "12.5") or mm:ss (e.g. "00:10").');
+
+  return spliceAtTimestampMs(submissionId, ms, btn);
+}
+
+// ---------- Render helpers ----------
 function renderSegments(segments) {
   if (!Array.isArray(segments) || segments.length === 0) {
     return `<div class="muted">No timestamps found.</div>`;
@@ -238,6 +324,32 @@ function renderScreenshot(submissionId) {
   `;
 }
 
+function renderSplice(submissionId) {
+  const s = spliceCache.get(submissionId);
+  if (!s) return `<div class="muted">No spliced output yet.</div>`;
+
+  const ts = typeof s.timestampMs === "number" ? msToStamp(s.timestampMs) : "—";
+  if (!s.url) {
+    const extra = s.outputFileName
+      ? `<div class="muted" style="margin-top:6px">Output file: ${escapeHtml(s.outputFileName)}</div>`
+      : s.outputRaw
+      ? `<div class="muted" style="margin-top:6px">Output: ${escapeHtml(String(s.outputRaw))}</div>`
+      : "";
+    return `<div class="muted">Splice done @ ${escapeHtml(ts)} but no playable URL was returned.${extra}</div>`;
+  }
+
+  return `
+    <div style="margin-top:10px">
+      <div class="muted">Spliced output @ ${escapeHtml(ts)}</div>
+      <video controls preload="metadata" src="${escapeHtml(s.url)}" style="width:100%; border-radius:12px; margin-top:6px;"></video>
+      <div style="margin-top:6px">
+        <a class="muted" href="${escapeHtml(s.url)}" target="_blank" rel="noreferrer">Open in new tab</a>
+      </div>
+    </div>
+  `;
+}
+
+// ---------- Load + render list ----------
 async function loadSubmissions() {
   listEl.innerHTML = "Loading...";
   try {
@@ -286,6 +398,40 @@ async function loadSubmissions() {
           </div>
         `;
 
+        const inferred = inferSpliceTimestampMsFromGemini(s.gemini);
+        const inferredLabel =
+          typeof inferred === "number" ? `Splice @ longest break (~${msToStamp(inferred)})` : "Splice @ longest break";
+
+        const spliceBox = `
+          <div class="transcript">
+            <div class="muted">Splice</div>
+
+            <div class="actions" style="gap:8px; flex-wrap:wrap;">
+              <!-- partner behavior -->
+              <button data-action="splice-prompt" data-id="${escapeHtml(s.id)}">Splice (prompt)</button>
+
+              <!-- extra (non-breaking): splice at inferred break -->
+              <button data-action="splice-auto" data-id="${escapeHtml(s.id)}" ${
+          typeof inferred === "number" ? `data-ts="${String(inferred)}"` : ""
+        }>${escapeHtml(inferredLabel)}</button>
+
+              <!-- custom ms inline -->
+              <input
+                data-action="splice-input"
+                data-id="${escapeHtml(s.id)}"
+                type="number"
+                min="0"
+                step="1"
+                placeholder="timestamp ms (e.g., 90500)"
+                style="max-width:220px;"
+              />
+              <button data-action="splice-custom" data-id="${escapeHtml(s.id)}">Splice @ custom ms</button>
+            </div>
+
+            ${renderSplice(s.id)}
+          </div>
+        `;
+
         return `
           <div class="row">
             <div class="meta">
@@ -310,11 +456,13 @@ async function loadSubmissions() {
             ${geminiBox}
             ${veoBox}
             ${screenshotBox}
+            ${spliceBox}
           </div>
         `;
       })
       .join("");
 
+    // wire buttons
     document.querySelectorAll('button[data-action="transcribe"]').forEach((btn) => {
       btn.addEventListener("click", () => transcribe(btn.dataset.id, btn));
     });
@@ -326,6 +474,34 @@ async function loadSubmissions() {
     });
     document.querySelectorAll('button[data-action="shot"]').forEach((btn) => {
       btn.addEventListener("click", () => midScreenshot(btn.dataset.id, btn));
+    });
+
+    // splice: partner prompt flow
+    document.querySelectorAll('button[data-action="splice-prompt"]').forEach((btn) => {
+      btn.addEventListener("click", () => splicePromptFlow(btn.dataset.id, btn));
+    });
+
+    // splice: auto (gemini inferred)
+    document.querySelectorAll('button[data-action="splice-auto"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const ts = clampInt(btn.dataset.ts, 0, Number.MAX_SAFE_INTEGER);
+        if (ts == null) return alert("No longest-break timestamp yet. Run Gemini analysis first.");
+        spliceAtTimestampMs(id, ts, btn);
+      });
+    });
+
+    // splice: custom ms input
+    document.querySelectorAll('button[data-action="splice-custom"]').forEach((btn) => {
+      btn.addEventListener("click", () => {
+        const id = btn.dataset.id;
+        const input = document.querySelector(
+          `input[data-action="splice-input"][data-id="${CSS.escape(id)}"]`
+        );
+        const ts = clampInt(input?.value, 0, Number.MAX_SAFE_INTEGER);
+        if (ts == null) return alert("Enter a valid timestamp in milliseconds.");
+        spliceAtTimestampMs(id, ts, btn);
+      });
     });
   } catch (e) {
     listEl.innerHTML = `<p class="error">Error: ${escapeHtml(e.message)}</p>`;

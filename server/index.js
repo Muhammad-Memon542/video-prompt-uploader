@@ -23,21 +23,26 @@ app.use(express.json({ limit: "2mb" }));
 const UPLOAD_DIR = path.join(__dirname, "uploads");
 const DATA_DIR = path.join(__dirname, "data");
 const SUBMISSIONS_PATH = path.join(DATA_DIR, "submissions.json");
+
 const TMP_DIR = path.join(__dirname, "tmp");
 const VEO_DIR = path.join(__dirname, "veo_outputs");
 const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
 
-fs.mkdirSync(UPLOAD_DIR, { recursive: true });
-fs.mkdirSync(DATA_DIR, { recursive: true });
-fs.mkdirSync(TMP_DIR, { recursive: true });
-fs.mkdirSync(VEO_DIR, { recursive: true });
-fs.mkdirSync(SCREENSHOTS_DIR, { recursive: true });
+// Splice output dir
+const EAVS_DIR = path.join(__dirname, "EAVs");
 
+// Ensure dirs exist
+[UPLOAD_DIR, DATA_DIR, TMP_DIR, VEO_DIR, SCREENSHOTS_DIR, EAVS_DIR].forEach((d) =>
+  fs.mkdirSync(d, { recursive: true })
+);
+
+// Ensure submissions storage exists
 if (!fs.existsSync(SUBMISSIONS_PATH)) fs.writeFileSync(SUBMISSIONS_PATH, "[]", "utf-8");
 
 // Serve generated assets
 app.use("/veo", express.static(VEO_DIR));
 app.use("/screenshots", express.static(SCREENSHOTS_DIR));
+app.use("/eavs", express.static(EAVS_DIR));
 
 // ---------- Multer config ----------
 const MAX_BYTES = 25 * 1024 * 1024; // 25MB
@@ -92,9 +97,38 @@ function run(cmd, args, opts = {}) {
   });
 }
 
+// Env-configurable bins
+const FFMPEG_BIN = process.env.FFMPEG_BIN || "ffmpeg";
+const FFPROBE_BIN =
+  process.env.FFPROBE_BIN ||
+  (typeof FFMPEG_BIN === "string"
+    ? FFMPEG_BIN.replace(/ffmpeg(\.exe)?$/i, "ffprobe$1")
+    : "ffprobe");
+const WHISPER_BIN = process.env.WHISPER_BIN || "whisper-cli";
+
+// ---------- ffprobe: audio presence ----------
+async function hasAudioStream(filePath) {
+  try {
+    const { out } = await run(FFPROBE_BIN, [
+      "-v",
+      "error",
+      "-select_streams",
+      "a",
+      "-show_entries",
+      "stream=index",
+      "-of",
+      "csv=p=0",
+      filePath
+    ]);
+    return String(out || "").trim().length > 0;
+  } catch {
+    return false;
+  }
+}
+
 // ---------- Screenshot helper ----------
 async function ensureMidScreenshot(videoPath, submissionId) {
-  const { out } = await run("ffprobe", [
+  const { out } = await run(FFPROBE_BIN, [
     "-v",
     "error",
     "-show_entries",
@@ -113,7 +147,7 @@ async function ensureMidScreenshot(videoPath, submissionId) {
   const pngName = `${submissionId}_mid.png`;
   const pngPath = path.join(SCREENSHOTS_DIR, pngName);
 
-  await run("ffmpeg", [
+  await run(FFMPEG_BIN, [
     "-hide_banner",
     "-loglevel",
     "error",
@@ -134,7 +168,11 @@ async function ensureMidScreenshot(videoPath, submissionId) {
 
 // ---------- Whisper helpers ----------
 function parseSrt(srt) {
-  const blocks = srt.split(/\n\s*\n/).map((b) => b.trim()).filter(Boolean);
+  const blocks = srt
+    .split(/\n\s*\n/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+
   const items = [];
   const timeRe = /(\d\d:\d\d:\d\d[.,]\d\d\d)\s*-->\s*(\d\d:\d\d:\d\d[.,]\d\d\d)/;
 
@@ -142,14 +180,19 @@ function parseSrt(srt) {
     const [hh, mm, rest] = t.split(":");
     const restNorm = rest.replace(".", ",");
     const [ss, ms] = restNorm.split(",");
-    return (+hh) * 3600000 + (+mm) * 60000 + (+ss) * 1000 + (+ms);
+    return +hh * 3600000 + +mm * 60000 + +ss * 1000 + +ms;
   };
 
   for (const b of blocks) {
-    const lines = b.split("\n").map((l) => l.trim()).filter(Boolean);
+    const lines = b
+      .split("\n")
+      .map((l) => l.trim())
+      .filter(Boolean);
     if (lines.length < 3) continue;
+
     const m = lines[1].match(timeRe);
     if (!m) continue;
+
     const text = lines.slice(2).join(" ");
     items.push({ startMs: toMs(m[1]), endMs: toMs(m[2]), text });
   }
@@ -166,7 +209,7 @@ async function transcribeWithWhisperCpp(videoPath) {
   const wavPath = path.join(TMP_DIR, `${base}.wav`);
   const outPrefix = path.join(TMP_DIR, base);
 
-  await run("ffmpeg", [
+  await run(FFMPEG_BIN, [
     "-hide_banner",
     "-loglevel",
     "error",
@@ -182,7 +225,7 @@ async function transcribeWithWhisperCpp(videoPath) {
     wavPath
   ]);
 
-  await run("whisper-cli", ["-m", modelPath, "-f", wavPath, "-otxt", "-osrt", "-of", outPrefix]);
+  await run(WHISPER_BIN, ["-m", modelPath, "-f", wavPath, "-otxt", "-osrt", "-of", outPrefix]);
 
   const txtPath = `${outPrefix}.txt`;
   const srtPath = `${outPrefix}.srt`;
@@ -242,7 +285,9 @@ function parseGeminiFourLines(rawText) {
 
   const show = showLine.replace(/^SHOW:\s*/i, "").trim() || "Unknown";
 
-  let breakStartMs = null, breakEndMs = null, breakDurationMs = null;
+  let breakStartMs = null,
+    breakEndMs = null,
+    breakDurationMs = null;
   const m = breakLine.match(/LONGEST_BREAK_MS:\s*(\d+)\s*-\s*(\d+)\s*\((\d+)\)/i);
   if (m) {
     breakStartMs = Number(m[1]);
@@ -253,7 +298,12 @@ function parseGeminiFourLines(rawText) {
   const clip1Question = qLine.replace(/^CLIP_1_QUESTION:\s*/i, "").trim();
   const clip2Answer = aLine.replace(/^CLIP_2_ANSWER:\s*/i, "").trim();
 
-  return { show, longestBreak: { breakStartMs, breakEndMs, breakDurationMs }, clip1Question, clip2Answer };
+  return {
+    show,
+    longestBreak: { breakStartMs, breakEndMs, breakDurationMs },
+    clip1Question,
+    clip2Answer
+  };
 }
 
 async function callGeminiGenerateContent({ apiKey, model, promptText }) {
@@ -323,6 +373,166 @@ Use the provided reference image to match the scene's visual style/setting.
 Tone: friendly narrator (not a specific character). Keep visuals simple and readable.
 The narrator delivers this ${label} line clearly:
 "${clipText}"`;
+}
+
+// ---------- FIXED: splice that uses generated VEO clips ----------
+async function probeVideoProps(filePath) {
+  // width, height, fps (as float)
+  const { out } = await run(FFPROBE_BIN, [
+    "-v",
+    "error",
+    "-select_streams",
+    "v:0",
+    "-show_entries",
+    "stream=width,height,r_frame_rate",
+    "-of",
+    "json",
+    filePath
+  ]);
+
+  const json = JSON.parse(String(out || "{}"));
+  const s = json?.streams?.[0] || {};
+  const width = Number(s.width) || 1280;
+  const height = Number(s.height) || 720;
+
+  // r_frame_rate like "30000/1001" or "30/1"
+  let fps = 30;
+  if (typeof s.r_frame_rate === "string" && s.r_frame_rate.includes("/")) {
+    const [a, b] = s.r_frame_rate.split("/").map(Number);
+    if (Number.isFinite(a) && Number.isFinite(b) && b !== 0) {
+      const v = a / b;
+      if (Number.isFinite(v) && v > 0 && v < 240) fps = v;
+    }
+  }
+
+  return { width, height, fps };
+}
+
+/**
+ * ✅ Robust splice:
+ * - Splits original at timestamp
+ * - Inserts clip1 + clip2
+ * - NORMALIZES all segments (scale + sar + fps + pix_fmt)
+ * - Ensures audio exists for every segment (adds silence if missing)
+ */
+async function spliceWithGeneratedClips({ originalPath, timestampMs, clip1Path, clip2Path, outputPath }) {
+  const tsSec = Math.max(0, Number(timestampMs) / 1000);
+
+  // Use ORIGINAL video as the "truth" for size/fps
+  const { width, height, fps } = await probeVideoProps(originalPath);
+
+  const a0 = await hasAudioStream(originalPath);
+  const a1 = await hasAudioStream(clip1Path);
+  const a2 = await hasAudioStream(clip2Path);
+
+  // For any clip without audio, we synthesize silent audio so concat can run with audio
+  // We'll always output audio (aac) to keep "normal" MP4 behavior.
+  const needSilence1 = !a1;
+  const needSilence2 = !a2;
+
+  // video normalization applied to every segment
+  // - scale to original size
+  // - force SAR 1:1
+  // - force fps
+  // - force pixel format
+  const V = (labelIn, labelOut) =>
+    `[${labelIn}]scale=${width}:${height}:force_original_aspect_ratio=decrease,pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2,setsar=1,fps=${fps.toFixed(
+      3
+    )},format=yuv420p,setpts=PTS-STARTPTS[${labelOut}]`;
+
+  // audio normalization
+  const A = (labelIn, labelOut) => `[${labelIn}]aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo,asetpts=PTS-STARTPTS[${labelOut}]`;
+
+  // Build filtergraph
+  // Inputs:
+  // 0 = original, 1 = clip1, 2 = clip2
+  //
+  // Create:
+  // - v0/a0 = original part A (0..ts)
+  // - v3/a3 = original part B (ts..end)
+  // - v1/a1 = clip1 normalized + optional silent audio
+  // - v2/a2 = clip2 normalized + optional silent audio
+  //
+  // Then concat n=4
+  const parts = [];
+
+  // Original Part A
+  parts.push(`[0:v]trim=0:${tsSec},setpts=PTS-STARTPTS[v0raw]`);
+  parts.push(V("v0raw", "v0"));
+  if (a0) {
+    parts.push(`[0:a]atrim=0:${tsSec},asetpts=PTS-STARTPTS[a0raw]`);
+    parts.push(A("a0raw", "a0"));
+  } else {
+    // extremely rare: original has no audio
+    parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:${tsSec},asetpts=PTS-STARTPTS[a0]`);
+  }
+
+  // Original Part B
+  parts.push(`[0:v]trim=${tsSec},setpts=PTS-STARTPTS[v3raw]`);
+  parts.push(V("v3raw", "v3"));
+  if (a0) {
+    parts.push(`[0:a]atrim=${tsSec},asetpts=PTS-STARTPTS[a3raw]`);
+    parts.push(A("a3raw", "a3"));
+  } else {
+    parts.push(`anullsrc=r=48000:cl=stereo,asetpts=PTS-STARTPTS[a3]`);
+  }
+
+  // Clip1 video
+  parts.push(V("1:v", "v1"));
+  if (needSilence1) {
+    // make ~8s silent audio for clip1 (your clips are 8s)
+    parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:8,asetpts=PTS-STARTPTS[a1]`);
+  } else {
+    parts.push(A("1:a", "a1"));
+  }
+
+  // Clip2 video
+  parts.push(V("2:v", "v2"));
+  if (needSilence2) {
+    parts.push(`anullsrc=r=48000:cl=stereo,atrim=0:8,asetpts=PTS-STARTPTS[a2]`);
+  } else {
+    parts.push(A("2:a", "a2"));
+  }
+
+  // Concat all 4
+  parts.push(`[v0][a0][v1][a1][v2][a2][v3][a3]concat=n=4:v=1:a=1[v][a]`);
+
+  const filter = parts.join(";");
+
+  const args = [
+    "-hide_banner",
+    "-loglevel",
+    "error",
+    "-i",
+    originalPath,
+    "-i",
+    clip1Path,
+    "-i",
+    clip2Path,
+    "-filter_complex",
+    filter,
+    "-map",
+    "[v]",
+    "-map",
+    "[a]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "23",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-movflags",
+    "+faststart",
+    "-y",
+    outputPath
+  ];
+
+  await run(FFMPEG_BIN, args);
+  return outputPath;
 }
 
 // ---------- Routes ----------
@@ -464,7 +674,6 @@ app.post("/api/veo/generate/:id", async (req, res) => {
       return res.status(400).json({ ok: false, error: "Missing Gemini clips. Run Analyze with Gemini first." });
     }
 
-    // Make/refresh screenshot and build reference image
     const { pngPath, screenshotUrl } = await ensureMidScreenshot(sub.file.path, sub.id);
     const screenshotReference = {
       image: {
@@ -510,6 +719,118 @@ app.post("/api/veo/generate/:id", async (req, res) => {
     res.json({ ok: true, veo: sub.veo });
   } catch (err) {
     res.status(500).json({ ok: false, error: err?.message || "Veo generation failed." });
+  }
+});
+
+/**
+ * ✅ FIXED /api/splice
+ * - If submissionId provided: uses generated VEO clips for that submission.
+ * - If not: falls back to server/temp/v1.mp4 and v2.mp4 (legacy).
+ * - Splices by splitting original at timestamp and inserting clips in between.
+ */
+app.post("/api/splice", upload.single("video"), async (req, res) => {
+  try {
+    const { timestamp, submissionId } = req.body;
+
+    if (!timestamp) {
+      if (req.file?.path) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ ok: false, error: "timestamp is required." });
+    }
+
+    const timestampMs = Number.parseInt(String(timestamp), 10);
+    if (!Number.isFinite(timestampMs) || timestampMs < 0) {
+      if (req.file?.path) fs.unlinkSync(req.file.path);
+      return res.status(400).json({ ok: false, error: "timestamp must be a non-negative integer (ms)." });
+    }
+
+    // Determine main video path
+    let mainVideoPath = null;
+    let sub = null;
+
+    if (submissionId) {
+      const submissions = readSubmissions();
+      sub = submissions.find((s) => s.id === submissionId);
+      if (!sub) return res.status(404).json({ ok: false, error: "Submission not found." });
+
+      mainVideoPath = sub.file?.path;
+      if (!mainVideoPath || !fs.existsSync(mainVideoPath)) {
+        return res.status(404).json({ ok: false, error: "Stored video file not found." });
+      }
+    } else if (req.file?.path) {
+      mainVideoPath = req.file.path;
+    } else {
+      return res.status(400).json({ ok: false, error: "Either upload a video or provide a submissionId." });
+    }
+
+    // Determine clip paths:
+    // 1) Prefer VEO-generated clips if submissionId exists and veo outputs exist
+    // 2) Otherwise fallback to server/temp/v1.mp4 and v2.mp4
+    let clip1Path = null;
+    let clip2Path = null;
+
+    if (sub?.id) {
+      const expected1 = path.join(VEO_DIR, `${sub.id}_clip1.mp4`);
+      const expected2 = path.join(VEO_DIR, `${sub.id}_clip2.mp4`);
+      if (fs.existsSync(expected1) && fs.existsSync(expected2)) {
+        clip1Path = expected1;
+        clip2Path = expected2;
+      } else if (sub.veo?.clip1Url && sub.veo?.clip2Url) {
+        // If URLs exist but files were moved, reconstruct disk path from URL
+        const f1 = path.basename(sub.veo.clip1Url);
+        const f2 = path.basename(sub.veo.clip2Url);
+        const p1 = path.join(VEO_DIR, f1);
+        const p2 = path.join(VEO_DIR, f2);
+        if (fs.existsSync(p1) && fs.existsSync(p2)) {
+          clip1Path = p1;
+          clip2Path = p2;
+        }
+      }
+    }
+
+    // Fallback legacy clips (partner setup)
+    if (!clip1Path || !clip2Path) {
+      const tempDir = path.join(__dirname, "temp");
+      const legacy1 = path.join(tempDir, "v1.mp4");
+      const legacy2 = path.join(tempDir, "v2.mp4");
+      if (fs.existsSync(legacy1) && fs.existsSync(legacy2)) {
+        clip1Path = legacy1;
+        clip2Path = legacy2;
+      }
+    }
+
+    if (!clip1Path || !clip2Path) {
+      return res.status(500).json({
+        ok: false,
+        error:
+          "AI clips not found. Generate VEO clips first, or provide legacy clips at server/temp/v1.mp4 and v2.mp4."
+      });
+    }
+
+    const outputFileName = `spliced_${Date.now()}_${nanoid(10)}.mp4`;
+    const outputFile = path.join(EAVS_DIR, outputFileName);
+
+    await spliceWithGeneratedClips({
+      originalPath: mainVideoPath,
+      timestampMs,
+      clip1Path,
+      clip2Path,
+      outputPath: outputFile
+    });
+
+    // Clean up uploaded temp main video if used (no submissionId)
+    if (!submissionId && req.file?.path) {
+      try { fs.unlinkSync(req.file.path); } catch {}
+    }
+
+    res.json({
+      ok: true,
+      output: outputFile,
+      outputFileName,
+      outputUrl: `/eavs/${outputFileName}`
+    });
+  } catch (err) {
+    if (req.file?.path) try { fs.unlinkSync(req.file.path); } catch {}
+    res.status(500).json({ ok: false, error: err?.message || "Splice failed." });
   }
 });
 
