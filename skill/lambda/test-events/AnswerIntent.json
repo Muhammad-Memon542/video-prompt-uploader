@@ -1,0 +1,28 @@
+{
+  "request": {
+    "type": "IntentRequest",
+    "requestId": "amzn1.echo-api.request.test-answer",
+    "timestamp": "2025-01-01T00:00:00.000Z",
+    "locale": "en-US",
+    "intent": {
+      "name": "AnswerIntent",
+      "confirmationStatus": "NONE",
+      "slots": {
+        "Answer": {
+          "name": "Answer",
+          "value": "photosynthesis",
+          "confirmationStatus": "NONE",
+          "source": "USER"
+        }
+      }
+    }
+  },
+  "session": {
+    "sessionId": "test-session-123",
+    "application": { "applicationId": "amzn1.ask.skill.test" },
+    "attributes": {
+      "submissionId": "YOUR_TEST_SUBMISSION_ID"
+    },
+    "new": false
+  }
+}

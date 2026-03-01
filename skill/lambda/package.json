@@ -1,0 +1,7 @@
+{
+  "name": "video-quiz-alexa-skill",
+  "version": "1.0.0",
+  "description": "Lambda for Video Quiz Alexa skill (Echo Show 5). Set BASE_URL in Lambda env to your backend.",
+  "main": "index.js",
+  "type": "module"
+}

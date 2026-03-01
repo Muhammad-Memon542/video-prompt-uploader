@@ -834,6 +834,116 @@ app.post("/api/splice", upload.single("video"), async (req, res) => {
   }
 });
 
+// ---------- Echo (Alexa) integration ----------
+const CLIP_DURATION_MS = 8000;
+
+function normalizeForComparison(text) {
+  return String(text || "")
+    .toLowerCase()
+    .trim()
+    .replace(/[^\w\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function getSignificantWords(text) {
+  const normalized = normalizeForComparison(text);
+  const stop = new Set(["the", "a", "an", "is", "are", "was", "were", "to", "of", "and", "or", "in", "it", "for", "that", "this", "on", "with", "as", "at", "by", "be", "have", "has", "had", "do", "does", "did", "will", "would", "could", "should", "can", "may", "might"]);
+  return normalized.split(/\s+/).filter((w) => w.length > 1 && !stop.has(w));
+}
+
+/**
+ * Compare user answer to expected answer. Returns { correct, message }.
+ * Uses exact match (after normalize) or keyword overlap (>= 70% of expected words present).
+ */
+function verifyAnswer(expectedAnswer, userAnswer) {
+  const expectedNorm = normalizeForComparison(expectedAnswer);
+  const userNorm = normalizeForComparison(userAnswer);
+  if (!expectedNorm) return { correct: false, message: "No expected answer defined." };
+  if (!userNorm) return { correct: false, message: "No answer received." };
+
+  if (expectedNorm === userNorm) return { correct: true, message: "That's right!" };
+
+  const expectedWords = getSignificantWords(expectedAnswer);
+  const userWords = new Set(getSignificantWords(userAnswer));
+  if (expectedWords.length === 0) return { correct: true, message: "That's right!" };
+
+  const matchCount = expectedWords.filter((w) => userWords.has(w)).length;
+  const ratio = matchCount / expectedWords.length;
+  if (ratio >= 0.7) return { correct: true, message: "That's right!" };
+
+  return {
+    correct: false,
+    message: `Not quite. The answer was: ${expectedAnswer.slice(0, 120)}${expectedAnswer.length > 120 ? "..." : ""}`
+  };
+}
+
+app.get("/api/echo/session/:submissionId", (req, res) => {
+  try {
+    const submissions = readSubmissions();
+    const sub = submissions.find((s) => s.id === req.params.submissionId);
+    if (!sub) return res.status(404).json({ ok: false, error: "Submission not found." });
+
+    const parsed = sub.gemini?.parsed;
+    if (!parsed?.clip1Question || !parsed?.clip2Answer) {
+      return res.status(400).json({
+        ok: false,
+        error: "Run Gemini analyze first to get question and answer clips."
+      });
+    }
+
+    const breakStartMs = parsed.longestBreak?.breakStartMs ?? 0;
+    const questionEndMs = breakStartMs + CLIP_DURATION_MS;
+    const answerEndMs = breakStartMs + 2 * CLIP_DURATION_MS;
+
+    const payload = {
+      submissionId: sub.id,
+      prompt: sub.prompt,
+      questionText: parsed.clip1Question,
+      expectedAnswer: parsed.clip2Answer,
+      timeline: {
+        spliceTimestampMs: breakStartMs,
+        questionEndMs,
+        answerStartMs: questionEndMs,
+        answerEndMs
+      },
+      clipDurationMs: CLIP_DURATION_MS,
+      instructions: "To get the spliced video URL, call POST /api/splice with body { submissionId, timestamp: timeline.spliceTimestampMs }."
+    };
+
+    res.json(payload);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || "Session failed." });
+  }
+});
+
+app.post("/api/echo/verify", (req, res) => {
+  try {
+    const { submissionId, userAnswer, sessionId } = req.body || {};
+    if (!submissionId) {
+      return res.status(400).json({ ok: false, error: "submissionId is required." });
+    }
+
+    const submissions = readSubmissions();
+    const sub = submissions.find((s) => s.id === submissionId);
+    if (!sub) return res.status(404).json({ ok: false, error: "Submission not found." });
+
+    const expectedAnswer = sub.gemini?.parsed?.clip2Answer;
+    if (!expectedAnswer) {
+      return res.status(400).json({ ok: false, error: "No expected answer for this submission. Run Gemini analyze first." });
+    }
+
+    const result = verifyAnswer(expectedAnswer, userAnswer ?? "");
+    res.json({
+      correct: result.correct,
+      message: result.message,
+      ...(sessionId && { sessionId })
+    });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || "Verify failed." });
+  }
+});
+
 // Multer errors (like file too large)
 app.use((err, _req, res, _next) => {
   if (err?.code === "LIMIT_FILE_SIZE") {
