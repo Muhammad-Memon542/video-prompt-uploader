@@ -222,6 +222,19 @@ function showResult(submission) {
   downloadLink.href = outputUrl;
   downloadLink.setAttribute("download", submission?.eav?.outputFileName || "eav.mp4");
 
+  // Play quiz button: when this submission has question/answer from Gemini
+  const actionsWrap = resultSection.querySelector(".result-actions");
+  const existingQuizBtn = actionsWrap?.querySelector(".btn-play-quiz");
+  if (existingQuizBtn) existingQuizBtn.remove();
+  if (actionsWrap && submission?.gemini?.parsed?.clip1Question && submission?.gemini?.parsed?.clip2Answer) {
+    const quizBtn = document.createElement("button");
+    quizBtn.type = "button";
+    quizBtn.className = "btn ghost btn-play-quiz";
+    quizBtn.textContent = "Play quiz";
+    quizBtn.addEventListener("click", () => startQuizPlayback(submission.id));
+    actionsWrap.appendChild(quizBtn);
+  }
+
   loadRail(submission?.id);
 }
 
@@ -364,6 +377,148 @@ form.addEventListener("submit", async (e) => {
 // Initial rail load
 loadRail();
 
-
 // Initialize debug panel
 try { debugReset(); } catch {}
+
+// ---------- Quiz playback: app detects wait screen and auto-starts voice (no Alexa) ----------
+async function getEchoSession(submissionId) {
+  const res = await fetch(`/api/echo/session/${encodeURIComponent(submissionId)}`);
+  const data = await res.json();
+  if (!res.ok) throw new Error(data?.error || "Session failed.");
+  return data;
+}
+
+async function ensureSpliceUrl(submissionId, session) {
+  const ts = session?.timeline?.spliceTimestampMs;
+  if (typeof ts !== "number") throw new Error("No splice timestamp in session.");
+  const fd = new FormData();
+  fd.append("submissionId", submissionId);
+  fd.append("timestamp", String(ts));
+  const res = await fetch("/api/splice", { method: "POST", body: fd });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data?.error || "Splice failed.");
+  const url = data.outputUrl || (data.outputFileName ? `/eavs/${data.outputFileName}` : null);
+  return url || null;
+}
+
+function getSpeechRecognition() {
+  return window.SpeechRecognition || window.webkitSpeechRecognition || null;
+}
+
+async function startQuizPlayback(submissionId) {
+  try {
+    const session = await getEchoSession(submissionId);
+    const questionEndMs = session?.timeline?.questionEndMs;
+    const answerStartMs = session?.timeline?.answerStartMs;
+    if (typeof questionEndMs !== "number") throw new Error("Session missing timeline.questionEndMs.");
+
+    const videoUrl = await ensureSpliceUrl(submissionId, session);
+    if (!videoUrl) throw new Error("Could not get spliced video URL.");
+
+    const overlay = document.createElement("div");
+    overlay.className = "quizOverlay";
+    const video = document.createElement("video");
+    video.className = "quizVideo";
+    video.controls = true;
+    video.src = videoUrl;
+    video.preload = "auto";
+
+    const waitScreen = document.createElement("div");
+    waitScreen.className = "quizWaitScreen";
+    waitScreen.innerHTML = '<h3>What\'s your answer?</h3><p class="quizStatus" aria-live="polite"></p>';
+    waitScreen.style.display = "none";
+
+    const closeBtn = document.createElement("button");
+    closeBtn.className = "quizClose";
+    closeBtn.textContent = "Close";
+    closeBtn.type = "button";
+
+    overlay.appendChild(closeBtn);
+    overlay.appendChild(video);
+    overlay.appendChild(waitScreen);
+    document.body.appendChild(overlay);
+
+    let recognition = null;
+    let answered = false;
+
+    function showWaitScreenAndListen() {
+      if (answered) return;
+      answered = true;
+      video.pause();
+      waitScreen.style.display = "block";
+      waitScreen.classList.remove("result", "error");
+      const statusEl = waitScreen.querySelector(".quizStatus");
+
+      const Recognition = getSpeechRecognition();
+      if (!Recognition) {
+        statusEl.textContent = "Speech recognition not supported in this browser. Use Chrome or Edge.";
+        return;
+      }
+
+      recognition = new Recognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = "en-US";
+
+      recognition.onstart = () => {
+        waitScreen.classList.add("listening");
+        statusEl.textContent = "Listening…";
+      };
+      recognition.onend = () => {
+        waitScreen.classList.remove("listening");
+      };
+      recognition.onerror = (e) => {
+        if (e.error === "no-speech") statusEl.textContent = "No speech heard. Try again.";
+        else statusEl.textContent = e.error || "Recognition error.";
+      };
+      recognition.onresult = async (e) => {
+        const transcript = (e.results[0] && e.results[0][0]) ? e.results[0][0].transcript : "";
+        if (!transcript.trim()) {
+          statusEl.textContent = "No answer heard. Say your answer again.";
+          answered = false;
+          waitScreen.classList.remove("listening");
+          recognition.start();
+          return;
+        }
+        statusEl.textContent = "Checking…";
+        try {
+          const res = await fetch("/api/echo/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ submissionId, userAnswer: transcript.trim() })
+          });
+          const data = await res.json();
+          const message = data?.message || (data?.correct ? "That's right!" : "Not quite.");
+          waitScreen.classList.add("result", data?.correct ? "" : "error");
+          waitScreen.querySelector("h3").textContent = message;
+          statusEl.textContent = "";
+          const utterance = new SpeechSynthesisUtterance(message);
+          utterance.rate = 0.95;
+          speechSynthesis.speak(utterance);
+          if (typeof answerStartMs === "number" && video.duration) {
+            video.currentTime = answerStartMs / 1000;
+            video.play().catch(() => {});
+          }
+        } catch (err) {
+          waitScreen.classList.add("result", "error");
+          statusEl.textContent = err.message || "Verify failed.";
+        }
+      };
+
+      recognition.start();
+    }
+
+    video.addEventListener("timeupdate", () => {
+      if (answered) return;
+      if (video.currentTime * 1000 >= questionEndMs) showWaitScreenAndListen();
+    }, { passive: true });
+
+    closeBtn.addEventListener("click", () => {
+      if (recognition) try { recognition.abort(); } catch (_) {}
+      speechSynthesis.cancel();
+      overlay.remove();
+    });
+  } catch (e) {
+    alert(e.message || "Quiz playback failed.");
+  }
+}

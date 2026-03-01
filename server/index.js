@@ -629,6 +629,17 @@ async function spliceWithGeneratedClips({ originalPath, timestampMs, clip1Path, 
 // ---------- Routes ----------
 app.get("/api/health", (_req, res) => res.json({ ok: true }));
 
+// Debug: list submission IDs the server can see (for verifying Echo/Lambda BASE_URL hits this instance)
+app.get("/api/echo/ids", (_req, res) => {
+  try {
+    const submissions = readSubmissions();
+    const submissionIds = submissions.map((s) => s.id);
+    res.json({ ok: true, submissionIds });
+  } catch (e) {
+    res.status(500).json({ ok: false, error: String(e?.message || e) });
+  }
+});
+
 app.post("/api/upload", upload.single("video"), (req, res) => {
   try {
     const prompt = (req.body?.prompt ?? "").trim();

@@ -33,9 +33,12 @@ Save and **Build Model**.
 
 ### 4. Deploy Lambda code
 
-- Zip `index.js` and `package.json` from `skill/lambda/` and upload to Lambda (or paste the code if using Alexa-Hosted).
+- Zip **only** the contents of `skill/lambda/`: `index.js` and `package.json` (no folder inside the zip – Lambda expects handler at root).
+- In AWS Lambda: **Code** → **Upload from** → **.zip file**. Choose your zip.
 - **Handler:** `index.handler`
 - **Runtime:** Node.js 18.x or 20.x
+
+**Important:** After any change to `skill/lambda/index.js`, create a new zip and upload again; the running Lambda uses whatever code was last deployed. The code includes the `ngrok-skip-browser-warning` header so ngrok forwards requests instead of showing the HTML warning page.
 
 ### 5. Test
 
