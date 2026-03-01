@@ -1,17 +1,46 @@
 /**
- * Video Quiz – Answer intent only.
+ * Video Quiz – Answer-only flow for app-driven video.
+ *
+ * Your app plays the video; when the wait screen loads, the user invokes Alexa
+ * once ("Alexa, open video quiz"), then Alexa asks for the answer, sends it to
+ * your server, and speaks the result. Invocation cannot be skipped (Alexa
+ * requires it), but it's a single phrase when the wait screen appears.
  *
  * Env:
  *   BASE_URL = https://your-ngrok-or-server.com  (required)
- *   TEST_SUBMISSION_ID = your submission id      (required for testing – used on Launch)
+ *   TEST_SUBMISSION_ID = submission id for this quiz (required)
  *
  * Flow:
- *   1. User: "Alexa, open video quiz" → Launch: we store TEST_SUBMISSION_ID, say "What's your answer?"
- *   2. User: "The answer is photosynthesis" → AnswerIntent: we call verify, speak result.
+ *   1. App plays video → wait screen loads.
+ *   2. User: "Alexa, open video quiz" → Launch: validate session, say "What's your answer?"
+ *   3. User: "The answer is …" → AnswerIntent: POST verify, speak result.
  */
 
 const BASE_URL = process.env.BASE_URL || "";
 const TEST_SUBMISSION_ID = process.env.TEST_SUBMISSION_ID || "";
+
+function getRequestHeaders() {
+  const h = { "Content-Type": "application/json" };
+  if (BASE_URL.includes("ngrok")) h["ngrok-skip-browser-warning"] = "1";
+  return h;
+}
+
+async function getSession(submissionId) {
+  const base = (BASE_URL || "").trim();
+  if (!base) throw new Error("Set BASE_URL in the Lambda environment.");
+  const url = `${base}/api/echo/session/${encodeURIComponent(submissionId)}`;
+  const res = await fetch(url, { headers: getRequestHeaders() });
+  const text = await res.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    const preview = text.trim().slice(0, 80).replace(/\s+/g, " ");
+    throw new Error(`Session API returned non-JSON (${res.status}). Response: ${preview}`);
+  }
+  if (!res.ok) throw new Error(data.error || "Session failed");
+  return data; // { submissionId, questionText, expectedAnswer, timeline, ... }
+}
 
 async function verifyAnswer(submissionId, userAnswer) {
   const base = (BASE_URL || "").trim();
@@ -21,10 +50,7 @@ async function verifyAnswer(submissionId, userAnswer) {
   const url = `${base}/api/echo/verify`;
   const res = await fetch(url, {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "ngrok-skip-browser-warning": "1",
-    },
+    headers: getRequestHeaders(),
     body: JSON.stringify({ submissionId, userAnswer: String(userAnswer || "").trim() }),
   });
   const text = await res.text();
@@ -33,8 +59,11 @@ async function verifyAnswer(submissionId, userAnswer) {
     data = JSON.parse(text);
   } catch {
     const preview = text.trim().slice(0, 80).replace(/\s+/g, " ");
+    const hint = preview.startsWith("<!") || preview.toLowerCase().startsWith("<!doctype")
+      ? " Backend returned HTML (e.g. ngrok warning page). Redeploy Lambda with latest code (ngrok-skip-browser-warning header) and confirm BASE_URL is your exact ngrok URL with no trailing slash."
+      : "";
     throw new Error(
-      `Backend returned non-JSON (status ${res.status}). Check BASE_URL and that the server is running. Response starts with: ${preview}`
+      `Backend returned non-JSON (status ${res.status}).${hint} Response starts with: ${preview}`
     );
   }
   if (!res.ok) throw new Error(data.error || "Verify failed");
@@ -87,7 +116,7 @@ export const handler = async (event) => {
   const session = event?.session || {};
   const attrs = session?.attributes || {};
 
-  // Launch: store submission id (from env) and ask for answer
+  // Launch: validate session (video already played in app), then ask for answer only
   if (type === "LaunchRequest") {
     const submissionId = TEST_SUBMISSION_ID.trim();
     if (!submissionId) {
@@ -96,17 +125,22 @@ export const handler = async (event) => {
         true
       );
     }
-    return {
-      version: "1.0",
-      response: {
-        outputSpeech: {
-          type: "SSML",
-          ssml: "<speak>What's your answer?</speak>",
+    try {
+      await getSession(submissionId); // validate quiz is ready; don't speak question (video played in app)
+      return {
+        version: "1.0",
+        response: {
+          outputSpeech: {
+            type: "SSML",
+            ssml: "<speak>What's your answer?</speak>",
+          },
+          shouldEndSession: false,
+          sessionAttributes: { ...attrs, submissionId },
         },
-        shouldEndSession: false,
-        sessionAttributes: { ...attrs, submissionId },
-      },
-    };
+      };
+    } catch (e) {
+      return say(`Sorry, couldn't load the quiz. ${escapeSsml(e.message || "Try again.")}`, true);
+    }
   }
 
   // Answer intent: verify and speak result
