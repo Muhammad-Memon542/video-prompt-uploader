@@ -1,0 +1,41 @@
+{
+  "id": "uk8GKwKLdonO72Ac",
+  "submissionId": "tE-qZHAcDohH",
+  "status": "error",
+  "step": "error",
+  "progress": 70,
+  "message": "{\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.Help\",\"links\":[{\"description\":\"Learn more about Gemini API quotas\",\"url\":\"https://ai.google.dev/gemini-api/docs/rate-limits\"}]}]}}",
+  "startedAt": "2026-03-01T01:54:02.636Z",
+  "updatedAt": "2026-03-01T01:54:12.052Z",
+  "result": null,
+  "error": {
+    "message": "{\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.Help\",\"links\":[{\"description\":\"Learn more about Gemini API quotas\",\"url\":\"https://ai.google.dev/gemini-api/docs/rate-limits\"}]}]}}",
+    "stack": "ApiError: {\"error\":{\"code\":429,\"message\":\"You exceeded your current quota, please check your plan and billing details. For more information on this error, head to: https://ai.google.dev/gemini-api/docs/rate-limits. To monitor your current usage, head to: https://ai.dev/rate-limit. \",\"status\":\"RESOURCE_EXHAUSTED\",\"details\":[{\"@type\":\"type.googleapis.com/google.rpc.Help\",\"links\":[{\"description\":\"Learn more about Gemini API quotas\",\"url\":\"https://ai.google.dev/gemini-api/docs/rate-limits\"}]}]}}\n    at throwErrorIfNotOK (file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/node_modules/@google/genai/dist/node/index.mjs:12423:30)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/node_modules/@google/genai/dist/node/index.mjs:12126:13\n    at async Models.generateVideos (file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/node_modules/@google/genai/dist/node/index.mjs:13832:20)\n    at async generateVeoClip (file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/index.js:415:19)\n    at async file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/index.js:753:9"
+  },
+  "steps": [
+    {
+      "step": "transcription",
+      "progress": 10,
+      "message": "Transcribing audio…",
+      "at": "2026-03-01T01:54:02.637Z"
+    },
+    {
+      "step": "analysis",
+      "progress": 35,
+      "message": "Analyzing with Gemini…",
+      "at": "2026-03-01T01:54:07.713Z"
+    },
+    {
+      "step": "screenshot",
+      "progress": 50,
+      "message": "Capturing reference frame…",
+      "at": "2026-03-01T01:54:11.795Z"
+    },
+    {
+      "step": "generation",
+      "progress": 70,
+      "message": "Generating learning clips…",
+      "at": "2026-03-01T01:54:11.904Z"
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+{
+  "id": "v8MeLWffsSPNFZBh",
+  "submissionId": "9aKUv7i-5H3z",
+  "status": "error",
+  "step": "error",
+  "progress": 35,
+  "message": "Gemini error 404: {\"error\":{\"code\":404,\"message\":\"models/gemini-3 is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.\",\"status\":\"NOT_FOUND\"}}",
+  "startedAt": "2026-03-01T02:07:39.820Z",
+  "updatedAt": "2026-03-01T02:07:49.786Z",
+  "result": null,
+  "error": {
+    "message": "Gemini error 404: {\"error\":{\"code\":404,\"message\":\"models/gemini-3 is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.\",\"status\":\"NOT_FOUND\"}}",
+    "stack": "Error: Gemini error 404: {\"error\":{\"code\":404,\"message\":\"models/gemini-3 is not found for API version v1beta, or is not supported for generateContent. Call ListModels to see the list of available models and their supported methods.\",\"status\":\"NOT_FOUND\"}}\n    at callGeminiGenerateContent (file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/index.js:394:23)\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)\n    at async file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/index.js:715:25"
+  },
+  "steps": [
+    {
+      "step": "transcription",
+      "progress": 10,
+      "message": "Transcribing audio…",
+      "at": "2026-03-01T02:07:39.821Z"
+    },
+    {
+      "step": "analysis",
+      "progress": 35,
+      "message": "Analyzing with Gemini…",
+      "at": "2026-03-01T02:07:49.485Z"
+    }
+  ]
+}

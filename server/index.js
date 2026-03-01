@@ -24,6 +24,8 @@ const UPLOAD_DIR = path.join(__dirname, "uploads");
 const DATA_DIR = path.join(__dirname, "data");
 const SUBMISSIONS_PATH = path.join(DATA_DIR, "submissions.json");
 
+const JOBS_DIR = path.join(DATA_DIR, "jobs");
+
 const TMP_DIR = path.join(__dirname, "tmp");
 const VEO_DIR = path.join(__dirname, "veo_outputs");
 const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
@@ -32,7 +34,7 @@ const SCREENSHOTS_DIR = path.join(__dirname, "screenshots");
 const EAVS_DIR = path.join(__dirname, "EAVs");
 
 // Ensure dirs exist
-[UPLOAD_DIR, DATA_DIR, TMP_DIR, VEO_DIR, SCREENSHOTS_DIR, EAVS_DIR].forEach((d) =>
+[UPLOAD_DIR, DATA_DIR, JOBS_DIR, TMP_DIR, VEO_DIR, SCREENSHOTS_DIR, EAVS_DIR].forEach((d) =>
   fs.mkdirSync(d, { recursive: true })
 );
 
@@ -73,11 +75,77 @@ const upload = multer({
 });
 
 // ---------- Helpers ----------
+const runningJobs = new Map(); // jobId -> Promise
+
 function readSubmissions() {
   return JSON.parse(fs.readFileSync(SUBMISSIONS_PATH, "utf-8"));
 }
 function writeSubmissions(items) {
   fs.writeFileSync(SUBMISSIONS_PATH, JSON.stringify(items, null, 2), "utf-8");
+}
+
+// ---------- Job state helpers ----------
+function jobPath(jobId) {
+  return path.join(JOBS_DIR, `${jobId}.json`);
+}
+
+function writeJob(job) {
+  job.updatedAt = new Date().toISOString();
+  fs.writeFileSync(jobPath(job.id), JSON.stringify(job, null, 2), "utf-8");
+}
+
+function readJob(jobId) {
+  const p = jobPath(jobId);
+  if (!fs.existsSync(p)) return null;
+  return JSON.parse(fs.readFileSync(p, "utf-8"));
+}
+
+function createJob({ submissionId }) {
+  const id = nanoid(16);
+  const job = {
+    id,
+    submissionId,
+    status: "queued", // queued | running | done | error
+    step: "queued",
+    progress: 0,
+    message: "Queued",
+    startedAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    result: null,
+    error: null,
+    steps: []
+  };
+  writeJob(job);
+  return job;
+}
+
+function pushStep(job, { step, progress, message }) {
+  const entry = { step, progress, message, at: new Date().toISOString() };
+  job.status = "running";
+  job.step = step;
+  job.progress = progress;
+  job.message = message;
+  job.steps.push(entry);
+  writeJob(job);
+}
+
+function finishJob(job, result) {
+  job.status = "done";
+  job.step = "done";
+  job.progress = 100;
+  job.message = "Done";
+  job.result = result;
+  job.error = null;
+  writeJob(job);
+}
+
+function failJob(job, err) {
+  job.status = "error";
+  job.step = "error";
+  job.progress = Math.min(job.progress || 0, 99);
+  job.message = err?.message || "Pipeline failed";
+  job.error = { message: job.message, stack: err?.stack || null };
+  writeJob(job);
 }
 
 function run(cmd, args, opts = {}) {
@@ -335,8 +403,14 @@ function getGenAIClient() {
   return new GoogleGenAI({ apiKey: key });
 }
 
-async function generateVeoClip({ prompt, outFile, referenceImages }) {
+async function generateVeoClip({ prompt, outFile, referenceImages, job, clipLabel }) {
   const ai = getGenAIClient();
+
+  // Veo can take a long time. We poll until it finishes.
+  // Set VEO_MAX_WAIT_MS=0 to wait indefinitely.
+  const MAX_WAIT_MS = Number(process.env.VEO_MAX_WAIT_MS ?? (60 * 60 * 1000)); // default 60 min
+  let waited = 0;
+  let pollMs = 8000;
 
   let operation = await ai.models.generateVideos({
     model: "veo-3.1-generate-preview",
@@ -348,8 +422,25 @@ async function generateVeoClip({ prompt, outFile, referenceImages }) {
   });
 
   while (!operation.done) {
-    console.log("Waiting for video generation to complete...");
-    await new Promise((r) => setTimeout(r, 10000));
+    if (job) {
+      pushStep(job, {
+        step: "generation",
+        progress: Math.min(89, (job.progress ?? 70) + 1),
+        message: `Veo still generating${clipLabel ? ` (${clipLabel})` : ""}…`
+      });
+    }
+
+    await new Promise((r) => setTimeout(r, pollMs));
+    waited += pollMs;
+
+    if (MAX_WAIT_MS > 0 && waited > MAX_WAIT_MS) {
+      throw new Error(
+        `Veo is still running after ${Math.round(waited / 60000)} minutes. ` +
+        `Increase VEO_MAX_WAIT_MS or set it to 0 to wait indefinitely.`
+      );
+    }
+
+    pollMs = Math.min(Math.round(pollMs * 1.2), 20000);
     operation = await ai.operations.getVideosOperation({ operation });
   }
 
@@ -575,6 +666,141 @@ app.post("/api/upload", upload.single("video"), (req, res) => {
 
 app.get("/api/submissions", (_req, res) => {
   res.json({ ok: true, submissions: readSubmissions() });
+});
+
+
+// ---------- One-click pipeline (server-side orchestration) ----------
+app.post("/api/pipeline/:id", async (req, res) => {
+  try {
+    const submissions = readSubmissions();
+    const sub = submissions.find((s) => s.id === req.params.id);
+    if (!sub) return res.status(404).json({ ok: false, error: "Submission not found." });
+
+    const job = createJob({ submissionId: sub.id });
+
+    // Start async pipeline (do not await)
+    const p = (async () => {
+      try {
+        let latestSubs = readSubmissions();
+        let idx = latestSubs.findIndex((s) => s.id === sub.id);
+        if (idx === -1) throw new Error("Submission not found during pipeline.");
+
+        let s = latestSubs[idx];
+
+        // Step 1: Transcription
+        pushStep(job, { step: "transcription", progress: 10, message: "Transcribing audio…" });
+        if (!s.transcript?.segments?.length) {
+          const { text, segments } = await transcribeWithWhisperCpp(s.file.path);
+          s.transcript = { provider: "whisper.cpp", text, segments, createdAt: new Date().toISOString() };
+          latestSubs[idx] = s;
+          writeSubmissions(latestSubs);
+        }
+
+        // Step 2: Gemini analysis
+        pushStep(job, { step: "analysis", progress: 35, message: "Analyzing with Gemini…" });
+        latestSubs = readSubmissions();
+        idx = latestSubs.findIndex((x) => x.id === sub.id);
+        s = latestSubs[idx];
+
+        const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY;
+        const model = process.env.GEMINI_MODEL || "gemini-2.5-flash";
+        if (!apiKey) throw new Error("Missing GEMINI_API_KEY (or GOOGLE_API_KEY) in .env");
+
+        const userGoal = s.prompt || "";
+        const segments = s.transcript?.segments || [];
+        const fullTranscript = s.transcript?.text || "";
+        if (!segments.length) throw new Error("No timestamped transcript found.");
+
+        const promptText = buildGeminiPrompt({ userGoal, segments, fullTranscript });
+        const rawText = await callGeminiGenerateContent({ apiKey, model, promptText });
+        const parsed = parseGeminiFourLines(rawText);
+
+        s.gemini = { model, createdAt: new Date().toISOString(), rawText, parsed };
+        latestSubs[idx] = s;
+        writeSubmissions(latestSubs);
+
+        // Step 3: Mid screenshot
+        pushStep(job, { step: "screenshot", progress: 50, message: "Capturing reference frame…" });
+        const { pngPath, screenshotUrl, midSec } = await ensureMidScreenshot(s.file.path, s.id);
+
+        // Step 4: Generate clips (VEO)
+        pushStep(job, { step: "generation", progress: 70, message: "Generating learning clips…" });
+        // Never fail the pipeline due to Gemini formatting drift.
+        // Force safe defaults if clips are missing.
+        if (!parsed?.clip1Question || !parsed?.clip2Answer) {
+          const goal = String(userGoal || "today’s topic").trim();
+          parsed.clip1Question ||= `Quick question: what’s the big idea behind ${goal}... and why does it matter?`;
+          parsed.clip2Answer ||= `Here’s the answer: ${goal} is about understanding the pattern and using it step-by-step, so you can solve problems confidently.`;
+        }
+        if (parsed?.clip1Question && !parsed.clip1Question.endsWith("?")) {
+          parsed.clip1Question = parsed.clip1Question.replace(/[.!\s]*$/, "?");
+        }
+
+        const screenshotReference = {
+          image: { imageBytes: fs.readFileSync(pngPath).toString("base64"), mimeType: "image/png" },
+          referenceType: "asset"
+        };
+
+        const showName = parsed.show || "Unknown";
+        const prompt1 = buildVeoPrompt({ showName, clipText: parsed.clip1Question, mode: "question" });
+        const prompt2 = buildVeoPrompt({ showName, clipText: parsed.clip2Answer, mode: "answer" });
+
+        const clip1FileName = `${s.id}_clip1.mp4`;
+        const clip2FileName = `${s.id}_clip2.mp4`;
+        const clip1Path = path.join(VEO_DIR, clip1FileName);
+        const clip2Path = path.join(VEO_DIR, clip2FileName);
+
+        await generateVeoClip({ prompt: prompt1, outFile: clip1Path, referenceImages: [screenshotReference], job, clipLabel: "clip 1/2" });
+        await generateVeoClip({ prompt: prompt2, outFile: clip2Path, referenceImages: [screenshotReference], job, clipLabel: "clip 2/2" });
+
+        latestSubs = readSubmissions();
+        idx = latestSubs.findIndex((x) => x.id === sub.id);
+        s = latestSubs[idx];
+
+        s.veo = {
+          updatedAt: new Date().toISOString(),
+          referenceScreenshotUrl: screenshotUrl,
+          midSec,
+          clip1Url: `/veo/${clip1FileName}`,
+          clip2Url: `/veo/${clip2FileName}`,
+          prompts: { prompt1, prompt2 }
+        };
+
+        // Step 5: Splice into the original
+        pushStep(job, { step: "splicing", progress: 90, message: "Splicing final video…" });
+
+        const breakStartMs = parsed?.longestBreak?.breakStartMs;
+        const timestampMs = Number.isFinite(breakStartMs) ? breakStartMs : Math.round((midSec || 0) * 1000);
+
+        const outputFileName = `eav_${Date.now()}_${nanoid(10)}.mp4`;
+        const outputFile = path.join(EAVS_DIR, outputFileName);
+
+        await spliceWithGeneratedClips({ originalPath: s.file.path, timestampMs, clip1Path, clip2Path, outputPath: outputFile });
+
+        s.eav = { updatedAt: new Date().toISOString(), timestampMs, outputFileName, outputUrl: `/eavs/${outputFileName}` };
+
+        latestSubs[idx] = s;
+        writeSubmissions(latestSubs);
+
+        finishJob(job, { submissionId: s.id, outputUrl: s.eav.outputUrl, outputFileName: s.eav.outputFileName });
+      } catch (err) {
+        failJob(job, err);
+      } finally {
+        runningJobs.delete(job.id);
+      }
+    })();
+
+    runningJobs.set(job.id, p);
+    res.json({ ok: true, jobId: job.id });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: err?.message || "Failed to start pipeline." });
+  }
+});
+
+app.get("/api/jobs/:jobId", (req, res) => {
+  const job = readJob(req.params.jobId);
+  if (!job) return res.status(404).json({ ok: false, error: "Job not found." });
+  res.json({ ok: true, job });
 });
 
 app.post("/api/transcribe/:id", async (req, res) => {
@@ -955,5 +1181,14 @@ app.use((err, _req, res, _next) => {
 // Serve client
 app.use(express.static(path.join(__dirname, "..", "client")));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+const PORT = Number(process.env.PORT) || 3000;
+
+const server = app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+  console.log(`VEO_MAX_WAIT_MS=${process.env.VEO_MAX_WAIT_MS ?? "3600000"} (set 0 to wait indefinitely)`);
+});
+
+// Avoid killing long-running requests (UI polls /api/jobs, but this makes the server resilient).
+server.requestTimeout = 0;   // Node 18+
+server.headersTimeout = 0;
+server.keepAliveTimeout = 120000;

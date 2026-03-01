@@ -1,0 +1,102 @@
+{
+  "id": "4ZdL1hshSrpXiwrd",
+  "submissionId": "zlxrlyp97Zxy",
+  "status": "done",
+  "step": "done",
+  "progress": 100,
+  "message": "Done",
+  "startedAt": "2026-03-01T02:00:18.142Z",
+  "updatedAt": "2026-03-01T02:02:29.326Z",
+  "result": {
+    "submissionId": "zlxrlyp97Zxy",
+    "outputUrl": "/eavs/eav_1772330538807_lwLC3WZun9.mp4",
+    "outputFileName": "eav_1772330538807_lwLC3WZun9.mp4"
+  },
+  "error": null,
+  "steps": [
+    {
+      "step": "transcription",
+      "progress": 10,
+      "message": "Transcribing audio…",
+      "at": "2026-03-01T02:00:18.143Z"
+    },
+    {
+      "step": "analysis",
+      "progress": 35,
+      "message": "Analyzing with Gemini…",
+      "at": "2026-03-01T02:00:27.791Z"
+    },
+    {
+      "step": "screenshot",
+      "progress": 50,
+      "message": "Capturing reference frame…",
+      "at": "2026-03-01T02:00:31.750Z"
+    },
+    {
+      "step": "generation",
+      "progress": 70,
+      "message": "Generating learning clips…",
+      "at": "2026-03-01T02:00:31.872Z"
+    },
+    {
+      "step": "generation",
+      "progress": 71,
+      "message": "Veo still generating (clip 1/2)…",
+      "at": "2026-03-01T02:00:32.451Z"
+    },
+    {
+      "step": "generation",
+      "progress": 72,
+      "message": "Veo still generating (clip 1/2)…",
+      "at": "2026-03-01T02:00:40.690Z"
+    },
+    {
+      "step": "generation",
+      "progress": 73,
+      "message": "Veo still generating (clip 1/2)…",
+      "at": "2026-03-01T02:00:50.519Z"
+    },
+    {
+      "step": "generation",
+      "progress": 74,
+      "message": "Veo still generating (clip 1/2)…",
+      "at": "2026-03-01T02:01:02.177Z"
+    },
+    {
+      "step": "generation",
+      "progress": 75,
+      "message": "Veo still generating (clip 1/2)…",
+      "at": "2026-03-01T02:01:16.216Z"
+    },
+    {
+      "step": "generation",
+      "progress": 76,
+      "message": "Veo still generating (clip 2/2)…",
+      "at": "2026-03-01T02:01:34.288Z"
+    },
+    {
+      "step": "generation",
+      "progress": 77,
+      "message": "Veo still generating (clip 2/2)…",
+      "at": "2026-03-01T02:01:42.511Z"
+    },
+    {
+      "step": "generation",
+      "progress": 78,
+      "message": "Veo still generating (clip 2/2)…",
+      "at": "2026-03-01T02:01:52.262Z"
+    },
+    {
+      "step": "generation",
+      "progress": 79,
+      "message": "Veo still generating (clip 2/2)…",
+      "at": "2026-03-01T02:02:04.011Z"
+    },
+    {
+      "step": "splicing",
+      "progress": 90,
+      "message": "Splicing final video…",
+      "at": "2026-03-01T02:02:18.807Z"
+    }
+  ]
+}

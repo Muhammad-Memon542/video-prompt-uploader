@@ -3,36 +3,189 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Video + Prompt Upload</title>
+    <title>EAV — Educational Augmented Video</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <main class="container">
-      <h1>Upload a Video + Prompt</h1>
-      <p class="sub">Max file size: <strong>25 MB</strong>. Allowed: mp4, webm, mov.</p>
+    <header class="topbar">
+      <div class="brand">
+        <div class="logo" aria-hidden="true">
+          <span class="cube red">E</span><span class="cube blue">A</span><span class="cube yellow">V</span>
+        </div>
+      </div>
 
-      <form id="uploadForm" class="card">
-        <label>
-          Video
-          <input id="videoInput" name="video" type="file" accept="video/mp4,video/webm,video/quicktime" required />
-        </label>
+      <nav class="nav">
+        <button class="navlink is-active" id="tabCreate" type="button">Create</button>
+        <button class="navlink" id="tabExplore" type="button">Explore</button>
+      </nav>
 
-        <label>
-          Prompt
-          <textarea id="promptInput" name="prompt" placeholder="What should we do with this video?" required></textarea>
-        </label>
+      <div class="topbar-right">
+        <button class="pill" type="button">
+          <span class="pill-dot" aria-hidden="true"></span>
+          Profile
+        </button>
+      </div>
+    </header>
 
-        <button id="submitBtn" type="submit">Upload</button>
+    <main class="page">
+      <!-- Hero -->
+      <section class="hero">
+        <div class="hero-copy">
+          <h1 class="hero-title">
+            Your kid’s <span class="accent">favorite show</span>,<br />
+            now with an <span class="accent-yellow">‘A’</span> in Math
+          </h1>
+          <p class="hero-sub">
+            One click from video → transcript → AI analysis → clip generation → seamless splice.
+          </p>
 
-        <div id="status" class="status" aria-live="polite"></div>
-      </form>
+          <div class="hero-actions">
+            <button class="btn primary" id="scrollToCreate" type="button">Start generating <span aria-hidden="true">→</span></button>
+          </div>
 
-      <section class="card">
-        <h2>Recent uploads</h2>
-        <button id="refreshBtn" type="button">Refresh</button>
-        <div id="list"></div>
+          <div class="status-wrap" aria-live="polite">
+            <div id="status" class="status" data-type="info"></div>
+
+            <div class="progress" id="progressWrap" hidden>
+              <div class="progress-top">
+                <span id="progressStep" class="progress-step">Preparing…</span>
+                <span id="progressPct" class="progress-pct">0%</span>
+              </div>
+              <div class="progress-bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+                <div class="progress-fill" id="progressFill"></div>
+              </div>
+              <div class="progress-hint" id="progressHint">
+                Transcription → Gemini → Screenshot → Generation → Splice
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual" aria-hidden="true">
+          <div class="bot-card">
+            <div class="bot">
+              <div class="bot-head"></div>
+              <div class="bot-face">
+                <div class="bot-eye"></div>
+                <div class="bot-eye"></div>
+              </div>
+              <div class="bot-body"></div>
+            </div>
+            <div class="doodles">
+              <span>2+2=4</span><span>√x</span><span>Adverbs</span><span>Our Solar System</span>
+            </div>
+          </div>
+        </div>
       </section>
+
+      <!-- Create -->
+      <section class="create" id="create">
+        <div class="card create-card">
+          <div class="card-header">
+            <div class="card-title">Paste or upload a video</div>
+            <div class="card-sub">Max 25MB • mp4/webm/mov</div>
+          </div>
+
+          <form id="uploadForm" class="form">
+            <div class="field two">
+              <div class="input-group">
+                <label class="label" for="urlInput">Video URL</label>
+                <input id="urlInput" class="input" type="url" placeholder="youtube.com/watch?v=… (optional — upload supported)" />
+                <div class="helper">URL ingestion can be added server-side; upload works now.</div>
+              </div>
+
+              <div class="input-group">
+                <label class="label" for="videoInput">Upload</label>
+                <input id="videoInput" class="file" name="video" type="file" accept="video/mp4,video/webm,video/quicktime" />
+              </div>
+            </div>
+
+            <div class="field">
+              <label class="label" for="promptInput">What should they learn?</label>
+              <textarea
+                id="promptInput"
+                class="textarea"
+                name="prompt"
+                placeholder="e.g. Explain how planets orbit the sun in a fun way at a third grade level"
+                rows="3"
+                required
+              ></textarea>
+            </div>
+
+            <div class="actions">
+              <button id="submitBtn" class="btn big primary" type="submit">Generate video</button>
+              <button id="resetBtn" class="btn big ghost" type="button">Reset</button>
+            </div>
+          </form>
+        </div>
+      </section>
+
+      <!-- Result -->
+      <section class="result" id="result" hidden>
+        <div class="result-grid">
+          <div class="card result-main">
+            <div class="card-header">
+              <div class="card-title">Your augmented video</div>
+              <div class="card-sub" id="resultMeta"></div>
+            </div>
+
+            <div class="video-shell">
+              <video id="resultVideo" controls playsinline></video>
+            </div>
+
+            <div class="result-actions">
+              <a class="btn" id="downloadLink" download>Download MP4</a>
+              <button class="btn ghost" id="newOne" type="button">Make another</button>
+            </div>
+          </div>
+
+          <div class="card result-rail">
+            <div class="card-header">
+              <div class="card-title">More like this</div>
+              <div class="card-sub">Your recent generations</div>
+            </div>
+            <div id="rail" class="rail"></div>
+          </div>
+        </div>
+      </section>
+
+      <footer class="footer">
+        <span>Built for hackathon-speed iteration — modular pipeline, clean UX.</span>
+      </footer>
     </main>
+
+    
+    <!-- Debug / Pipeline panel (remove anytime) -->
+    <button class="debug-fab" id="debugToggle" type="button" aria-controls="debugPanel" aria-expanded="false" title="Show pipeline details">
+      <span class="debug-fab-dot" aria-hidden="true"></span>
+      Pipeline
+    </button>
+
+    <aside class="debug-panel" id="debugPanel" hidden>
+      <div class="debug-head">
+        <div>
+          <div class="debug-title">Pipeline</div>
+          <div class="debug-sub">Live status (safe to remove later)</div>
+        </div>
+        <button class="debug-close" id="debugClose" type="button" aria-label="Close">✕</button>
+      </div>
+
+      <ol class="debug-steps" id="debugSteps">
+        <li data-step="upload"><span class="dot"></span><div><div class="t">Upload</div><div class="s">Waiting…</div></div></li>
+        <li data-step="transcription"><span class="dot"></span><div><div class="t">Transcription</div><div class="s">Waiting…</div></div></li>
+        <li data-step="analysis"><span class="dot"></span><div><div class="t">Gemini analysis</div><div class="s">Waiting…</div></div></li>
+        <li data-step="screenshot"><span class="dot"></span><div><div class="t">Mid screenshot</div><div class="s">Waiting…</div></div></li>
+        <li data-step="generation"><span class="dot"></span><div><div class="t">Video generation</div><div class="s">Waiting…</div></div></li>
+        <li data-step="splicing"><span class="dot"></span><div><div class="t">Splice</div><div class="s">Waiting…</div></div></li>
+        <li data-step="done"><span class="dot"></span><div><div class="t">Done</div><div class="s">Waiting…</div></div></li>
+      </ol>
+
+      <div class="debug-log-wrap">
+        <div class="debug-log-title">Logs</div>
+        <div class="debug-log" id="debugLog" role="log" aria-live="polite"></div>
+      </div>
+    </aside>
+
 
     <script src="/app.js"></script>
   </body>

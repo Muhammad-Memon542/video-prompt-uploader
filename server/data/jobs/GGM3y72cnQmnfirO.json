@@ -1,0 +1,41 @@
+{
+  "id": "GGM3y72cnQmnfirO",
+  "submissionId": "99064tIO3sRM",
+  "status": "error",
+  "step": "error",
+  "progress": 70,
+  "message": "Gemini output missing clips.",
+  "startedAt": "2026-03-01T01:42:26.554Z",
+  "updatedAt": "2026-03-01T01:42:36.289Z",
+  "result": null,
+  "error": {
+    "message": "Gemini output missing clips.",
+    "stack": "Error: Gemini output missing clips.\n    at file:///Users/muhammadmemon/Downloads/Learn/video-prompt-uploader/server/index.js:705:67\n    at process.processTicksAndRejections (node:internal/process/task_queues:103:5)"
+  },
+  "steps": [
+    {
+      "step": "transcription",
+      "progress": 10,
+      "message": "Transcribing audio…",
+      "at": "2026-03-01T01:42:26.556Z"
+    },
+    {
+      "step": "analysis",
+      "progress": 35,
+      "message": "Analyzing with Gemini…",
+      "at": "2026-03-01T01:42:31.786Z"
+    },
+    {
+      "step": "screenshot",
+      "progress": 50,
+      "message": "Capturing reference frame…",
+      "at": "2026-03-01T01:42:36.174Z"
+    },
+    {
+      "step": "generation",
+      "progress": 70,
+      "message": "Generating learning clips…",
+      "at": "2026-03-01T01:42:36.288Z"
+    }
+  ]
+}
